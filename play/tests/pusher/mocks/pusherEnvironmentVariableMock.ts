@@ -41,6 +41,7 @@ export const OPID_USERNAME_CLAIM = "username";
 export const OPID_LOCALE_CLAIM = "locale";
 export const OPID_WOKA_NAME_POLICY: OpidWokaNamePolicy = "user_input";
 export const OPID_TAGS_CLAIM = "tags";
+export const ALLOWED_GOOGLE_WORKSPACE_DOMAINS: string[] = [];
 export const DISABLE_ANONYMOUS = false;
 export const PROMETHEUS_AUTHORIZATION_TOKEN: string | undefined = undefined;
 export const PROMETHEUS_PORT = 0;
