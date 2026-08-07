@@ -9,6 +9,10 @@ import {
     toBool,
     toNumber,
 } from "@workadventure/shared-utils/src/EnvironmentVariables/EnvironmentVariableUtils";
+import {
+    isValidWorkspaceDomain,
+    normalizeAllowedDomains,
+} from "../services/Authentication/AllowedGoogleWorkspaceDomains";
 
 export const EnvironmentVariables = z.object({
     // Pusher related environment variables
@@ -221,6 +225,18 @@ export const EnvironmentVariables = z.object({
         "Policy for avatar naming: 'user_input' or 'openid_nickname'",
     ),
     OPENID_TAGS_CLAIM: z.string().optional().describe("JWT claim containing user tags/roles"),
+    ALLOWED_GOOGLE_WORKSPACE_DOMAINS: z
+        .string()
+        .optional()
+        .transform((val) => toArray(val))
+        .refine((domains) => domains.every((domain) => isValidWorkspaceDomain(domain)), {
+            message:
+                "must be a comma-separated list of valid hosted domains (e.g. 'example.com,example.co.jp'); entries cannot be blank, a wildcard, or an email address",
+        })
+        .transform((domains) => normalizeAllowedDomains(domains))
+        .describe(
+            "Comma-separated list of Google Workspace hosted domains allowed to authenticate (e.g. 'example.com,example.co.jp'). Leave unset to disable Google Workspace domain-restricted login (opt-in feature).",
+        ),
 
     DISABLE_ANONYMOUS: BoolAsString.optional()
         .transform((val) => toBool(val, false))
