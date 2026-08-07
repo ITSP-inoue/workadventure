@@ -11,6 +11,8 @@ import type { AuthTokenData } from "../services/JWTTokenManager";
 import { jwtTokenManager } from "../services/JWTTokenManager";
 import { openIDClient } from "../services/OpenIDClient";
 import { DISABLE_ANONYMOUS, FRONT_URL, MATRIX_PUBLIC_URI, PUSHER_URL } from "../enums/EnvironmentVariable";
+import { allowedDomainValidator } from "../services/Authentication/AllowedDomainValidator";
+import { logAuthenticationAttempt } from "../services/Authentication/AuditLog";
 import { adminService } from "../services/AdminService";
 import { validateQuery } from "../services/QueryValidator";
 import { VerifyDomainService } from "../services/verifyDomain/VerifyDomainService";
@@ -314,6 +316,23 @@ export class AuthenticateController extends BaseHttpController {
             if (!email) {
                 throw new Error("No email in the response");
             }
+
+            // Google Workspace domain restriction (spec-kit-practice#1): an opt-in check.
+            // When ALLOWED_GOOGLE_WORKSPACE_DOMAINS is unset, allowedDomainValidator.check()
+            // always allows, so anonymous/ADMIN_API_URL flows and OIDC providers other than
+            // Google are unaffected (FR-011).
+            const domainCheck = allowedDomainValidator.check(userInfo.hostedDomain);
+            logAuthenticationAttempt({
+                result: domainCheck.allowed ? "allowed" : "denied",
+                domain: domainCheck.domain,
+                subject: userInfo.sub ?? null,
+            });
+            if (!domainCheck.allowed) {
+                res.status(403);
+                res.send("Your Google account is not part of an organization allowed to access this space.");
+                return;
+            }
+
             const authToken = await jwtTokenManager.createAuthToken(
                 email,
                 userInfo?.access_token,
