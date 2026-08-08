@@ -15,6 +15,7 @@ import {
     SECRET_KEY,
     OPID_TAGS_CLAIM,
 } from "../enums/EnvironmentVariable";
+import { extractGoogleWorkspaceClaims } from "./Authentication/IdTokenClaims";
 
 custom.setHttpOptionsDefaults({
     timeout: 50000,
@@ -127,6 +128,13 @@ class OpenIDClient {
         locale: string;
         matrix_url: string | undefined;
         matrix_identity_provider: string | undefined;
+        /**
+         * The Google Workspace hosted domain claim, or null for a personal Gmail
+         * account (or any non-Google/non-Workspace provider). Sourced from the ID
+         * token's own claims, not from the UserInfo endpoint response below, which
+         * Google does not include `hd` in (spec-kit-practice#1, T003 / PR #37).
+         */
+        hostedDomain: string | null;
     }> {
         const fullUrl = req.url;
         const cookies = req.cookies;
@@ -153,6 +161,8 @@ class OpenIDClient {
                 res.clearCookie("code_verifier");
                 res.clearCookie("oidc_state");
 
+                const { hostedDomain } = extractGoogleWorkspaceClaims(tokenSet.claims());
+
                 return client
                     .userinfo(tokenSet, {
                         params: {
@@ -170,6 +180,7 @@ class OpenIDClient {
                             tags: res[OPID_TAGS_CLAIM] as string[],
                             matrix_url: res.matrix_url as string | undefined,
                             matrix_identity_provider: res.matrix_identity_provider as string | undefined,
+                            hostedDomain,
                         };
                     });
             });

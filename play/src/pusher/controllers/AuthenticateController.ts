@@ -1,6 +1,6 @@
 import fs from "fs";
 import { v4 } from "uuid";
-import type { MeResponse, RegisterData } from "@workadventure/messages";
+import type { ErrorApiUnauthorizedData, MeResponse, RegisterData } from "@workadventure/messages";
 import { MeRequest } from "@workadventure/messages";
 import { z } from "zod";
 import { errors } from "jose";
@@ -11,6 +11,8 @@ import type { AuthTokenData } from "../services/JWTTokenManager";
 import { jwtTokenManager } from "../services/JWTTokenManager";
 import { openIDClient } from "../services/OpenIDClient";
 import { DISABLE_ANONYMOUS, FRONT_URL, MATRIX_PUBLIC_URI, PUSHER_URL } from "../enums/EnvironmentVariable";
+import { allowedDomainValidator } from "../services/Authentication/AllowedDomainValidator";
+import { logAuthenticationAttempt } from "../services/Authentication/AuditLog";
 import { adminService } from "../services/AdminService";
 import { validateQuery } from "../services/QueryValidator";
 import { VerifyDomainService } from "../services/verifyDomain/VerifyDomainService";
@@ -231,6 +233,30 @@ export class AuthenticateController extends BaseHttpController {
                     return;
                 }
 
+                // Re-check Google Workspace domain membership on reconnect (spec-kit-practice#1,
+                // FR-010, T027): an admin narrowing ALLOWED_GOOGLE_WORKSPACE_DOMAINS after this
+                // session's login takes effect here, without waiting for the JWT to expire. Only
+                // the denial transition is logged -- the initial login already logged the allow
+                // (T011), and logging every reconnect heartbeat as "allowed" would just be noise.
+                const reconnectDomainCheck = allowedDomainValidator.check(authTokenData.hostedDomain ?? null);
+                if (!reconnectDomainCheck.allowed) {
+                    logAuthenticationAttempt({
+                        result: "denied",
+                        domain: reconnectDomainCheck.domain,
+                        subject: authTokenData.identifier,
+                    });
+                    res.json({
+                        status: "error",
+                        type: "unauthorized",
+                        code: "GOOGLE_WORKSPACE_DOMAIN_NOT_ALLOWED",
+                        title: "Access no longer allowed",
+                        subtitle: "Your Google account is no longer part of an organization allowed to access this space.",
+                        details: "Please log out and sign in again with an account from an allowed organization.",
+                        buttonTitle: "Log out",
+                    } satisfies ErrorApiUnauthorizedData);
+                    return;
+                }
+
                 try {
                     const resCheckTokenAuth = await openIDClient.checkTokenAuth(authTokenData.accessToken);
                     res.json({
@@ -314,6 +340,30 @@ export class AuthenticateController extends BaseHttpController {
             if (!email) {
                 throw new Error("No email in the response");
             }
+
+            // Google Workspace domain restriction (spec-kit-practice#1): an opt-in check.
+            // When ALLOWED_GOOGLE_WORKSPACE_DOMAINS is unset, allowedDomainValidator.check()
+            // always allows, so anonymous/ADMIN_API_URL flows are unaffected (FR-011). This is
+            // specifically a Google feature: hostedDomain only ever comes from a Google-issued ID
+            // token's hd claim (IdTokenClaims.ts), so if ALLOWED_GOOGLE_WORKSPACE_DOMAINS is set
+            // while OPENID_CLIENT_ISSUER points at a non-Google OIDC provider, hostedDomain will
+            // always be null and every OIDC login will be denied -- don't combine the two.
+            const domainCheck = allowedDomainValidator.check(userInfo.hostedDomain, userInfo.email || null);
+            logAuthenticationAttempt({
+                result: domainCheck.allowed ? "allowed" : "denied",
+                domain: domainCheck.domain,
+                // Use the same identifier that ends up in the JWT (createAuthToken(email, ...)
+                // below) rather than the Google `sub` claim, so this login's "allowed" line and a
+                // later /me or WS-reconnect "denied" line for the same session (which only has
+                // `identifier`, never `sub`, to log) can be correlated by `subject` (SC-005).
+                subject: email,
+            });
+            if (!domainCheck.allowed) {
+                res.status(403);
+                res.send("Your Google account is not part of an organization allowed to access this space.");
+                return;
+            }
+
             const authToken = await jwtTokenManager.createAuthToken(
                 email,
                 userInfo?.access_token,
@@ -321,6 +371,7 @@ export class AuthenticateController extends BaseHttpController {
                 userInfo?.locale,
                 userInfo?.tags,
                 email ? matrixProvider.getBareMatrixIdFromEmail(email) : undefined,
+                domainCheck.domain,
             );
 
             const matrixPublicUri = userInfo.matrix_url ?? MATRIX_PUBLIC_URI;

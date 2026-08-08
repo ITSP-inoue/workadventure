@@ -12,6 +12,8 @@ import type { FetchMemberDataByUuidResponse } from "../services/AdminApi";
 import type { AdminSocketTokenData } from "../services/JWTTokenManager";
 import { jwtTokenManager, tokenInvalidException } from "../services/JWTTokenManager";
 import { socketManager } from "../services/SocketManager";
+import { allowedDomainValidator } from "../services/Authentication/AllowedDomainValidator";
+import { logAuthenticationAttempt } from "../services/Authentication/AuditLog";
 import {
     ADMIN_SOCKETS_TOKEN,
     DISABLE_ANONYMOUS,
@@ -333,6 +335,44 @@ export class IoSocketController {
 
                     const userIdentifier = tokenData ? tokenData.identifier : "";
                     const isLogged = !!tokenData?.accessToken;
+
+                    // Re-check Google Workspace domain membership here too, not just in /me
+                    // (spec-kit-practice#1, FR-010): this upgrade handler is the actual gate that
+                    // admits a socket into a room, and a client can reconnect straight to it with
+                    // a cached JWT without ever calling /me again (e.g. the front's own WebSocket
+                    // reconnect logic after a network blip). Relying on /me alone would leave a
+                    // stale-token window where an admin narrowing the allow-list -- or a token
+                    // whose hd claim was never allowed in the first place -- doesn't actually keep
+                    // the room out.
+                    if (isLogged && tokenData) {
+                        const wsDomainCheck = allowedDomainValidator.check(tokenData.hostedDomain ?? null);
+                        if (!wsDomainCheck.allowed) {
+                            logAuthenticationAttempt({
+                                result: "denied",
+                                domain: wsDomainCheck.domain,
+                                subject: tokenData.identifier,
+                            });
+                            if (isAborted()) {
+                                return;
+                            }
+                            reject({
+                                rejected: true,
+                                reason: "error",
+                                error: {
+                                    status: "error",
+                                    type: "unauthorized",
+                                    code: "GOOGLE_WORKSPACE_DOMAIN_NOT_ALLOWED",
+                                    title: "Access no longer allowed",
+                                    subtitle:
+                                        "Your Google account is no longer part of an organization allowed to access this space.",
+                                    details:
+                                        "Please log out and sign in again with an account from an allowed organization.",
+                                    buttonTitle: "Log out",
+                                },
+                            } satisfies UpgradeFailedData);
+                            return;
+                        }
+                    }
 
                     let memberTags: string[] = [];
                     let memberVisitCardUrl: string | null = null;

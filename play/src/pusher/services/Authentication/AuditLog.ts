@@ -12,7 +12,12 @@ export interface AuthenticationAttemptEvent {
     readonly result: AuthenticationAttemptResult;
     /** hd claim presented by the identity token, or null if absent (e.g. personal Gmail). */
     readonly domain: string | null;
-    /** Stable user identifier (the token's `sub` claim), not the raw token. */
+    /**
+     * The user identifier used consistently across login and reconnect logging --
+     * the same value stored as AuthTokenData.identifier (email, or the Google `sub`
+     * claim when no email is present) -- so entries for the same session can be
+     * correlated (SC-005). Never the raw token.
+     */
     readonly subject: string | null;
     readonly timestamp?: Date;
 }
