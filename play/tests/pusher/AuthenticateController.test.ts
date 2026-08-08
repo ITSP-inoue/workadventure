@@ -66,6 +66,14 @@ class MockApp {
         }
         await handler(req, res);
     }
+
+    async simulatePost(endpoint: string, req: Request, res: Response) {
+        const handler = this.postRoutes.get(endpoint);
+        if (!handler) {
+            throw new Error(`No handler registered for POST ${endpoint}`);
+        }
+        await handler(req, res);
+    }
 }
 
 class FakeResponse {
@@ -214,5 +222,33 @@ describe("AuthenticateController /openid-callback — Google Workspace domain re
 
         expect(createAuthToken).toHaveBeenCalledTimes(1);
         expect(res.statusCode).not.toBe(403);
+    });
+});
+
+describe("AuthenticateController /anonymLogin — unaffected by Google Workspace domain restriction (T021)", () => {
+    let app: MockApp;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        createAuthToken.mockResolvedValue("fake-anonymous-jwt-token");
+        app = new MockApp();
+        new AuthenticateController(app as unknown as Application);
+    });
+
+    it("issues an anonymous token without consulting AllowedDomainValidator, even if it would deny", async () => {
+        // ALLOWED_GOOGLE_WORKSPACE_DOMAINS being set (or the validator denying) must never
+        // affect anonymous login: it's a separate, unrelated route (FR-011).
+        checkDomain.mockReturnValue({ allowed: false, domain: null });
+
+        const req = {} as Request;
+        const res = new FakeResponse();
+
+        await app.simulatePost("/anonymLogin", req, res as unknown as Response);
+
+        expect(checkDomain).not.toHaveBeenCalled();
+        expect(logAuthenticationAttempt).not.toHaveBeenCalled();
+        expect(createAuthToken).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).not.toBe(403);
+        expect(res.body).toContain("fake-anonymous-jwt-token");
     });
 });

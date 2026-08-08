@@ -45,6 +45,7 @@ Environment variables for the Play service (frontend and pusher).
 | `OPENID_LOCALE_CLAIM` | No | JWT claim to use for user locale. Defaults to 'locale' |
 | `OPENID_WOKA_NAME_POLICY` | No | Policy for avatar naming: 'user_input' or 'openid_nickname' |
 | `OPENID_TAGS_CLAIM` | No | JWT claim containing user tags/roles |
+| `ALLOWED_GOOGLE_WORKSPACE_DOMAINS` | No | Comma-separated list of Google Workspace hosted domains allowed to authenticate (e.g. 'example.com,example.co.jp'). Leave unset to disable Google Workspace domain-restricted login (opt-in feature). |
 | `DISABLE_ANONYMOUS` | No | If true, anonymous users cannot access the platform. Defaults to false |
 | `PROMETHEUS_AUTHORIZATION_TOKEN` | No | The token to access the Prometheus metrics. |
 | `PROMETHEUS_PORT` | No | The port to access the Prometheus metrics. If not set, the default port is used AND an authorization token is required. |
