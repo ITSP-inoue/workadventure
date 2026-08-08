@@ -177,7 +177,7 @@ describe("AuthenticateController /openid-callback — Google Workspace domain re
         expect(logAuthenticationAttempt).toHaveBeenCalledWith({
             result: "allowed",
             domain: "example-corp.com",
-            subject: "1234567890",
+            subject: "user@example-corp.com",
         });
     });
 
@@ -196,7 +196,7 @@ describe("AuthenticateController /openid-callback — Google Workspace domain re
         expect(logAuthenticationAttempt).toHaveBeenCalledWith({
             result: "denied",
             domain: null,
-            subject: "1234567890",
+            subject: "someone@gmail.com",
         });
     });
 

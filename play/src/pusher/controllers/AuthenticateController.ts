@@ -343,13 +343,20 @@ export class AuthenticateController extends BaseHttpController {
 
             // Google Workspace domain restriction (spec-kit-practice#1): an opt-in check.
             // When ALLOWED_GOOGLE_WORKSPACE_DOMAINS is unset, allowedDomainValidator.check()
-            // always allows, so anonymous/ADMIN_API_URL flows and OIDC providers other than
-            // Google are unaffected (FR-011).
+            // always allows, so anonymous/ADMIN_API_URL flows are unaffected (FR-011). This is
+            // specifically a Google feature: hostedDomain only ever comes from a Google-issued ID
+            // token's hd claim (IdTokenClaims.ts), so if ALLOWED_GOOGLE_WORKSPACE_DOMAINS is set
+            // while OPENID_CLIENT_ISSUER points at a non-Google OIDC provider, hostedDomain will
+            // always be null and every OIDC login will be denied -- don't combine the two.
             const domainCheck = allowedDomainValidator.check(userInfo.hostedDomain, userInfo.email || null);
             logAuthenticationAttempt({
                 result: domainCheck.allowed ? "allowed" : "denied",
                 domain: domainCheck.domain,
-                subject: userInfo.sub ?? null,
+                // Use the same identifier that ends up in the JWT (createAuthToken(email, ...)
+                // below) rather than the Google `sub` claim, so this login's "allowed" line and a
+                // later /me or WS-reconnect "denied" line for the same session (which only has
+                // `identifier`, never `sub`, to log) can be correlated by `subject` (SC-005).
+                subject: email,
             });
             if (!domainCheck.allowed) {
                 res.status(403);

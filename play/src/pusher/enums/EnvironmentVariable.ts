@@ -86,6 +86,17 @@ export const OPID_LOCALE_CLAIM = env.OPENID_LOCALE_CLAIM || env.OPID_LOCALE_CLAI
 export const OPID_WOKA_NAME_POLICY = env.OPENID_WOKA_NAME_POLICY || env.OPID_WOKA_NAME_POLICY || "user_input";
 export const OPID_TAGS_CLAIM = env.OPENID_TAGS_CLAIM || env.OPID_TAGS_CLAIM || "tags";
 export const ALLOWED_GOOGLE_WORKSPACE_DOMAINS: string[] = env.ALLOWED_GOOGLE_WORKSPACE_DOMAINS;
+if (ALLOWED_GOOGLE_WORKSPACE_DOMAINS.length > 0 && OPID_CLIENT_ISSUER && !OPID_CLIENT_ISSUER.includes("google")) {
+    // ALLOWED_GOOGLE_WORKSPACE_DOMAINS only ever has an effect on Google-issued ID tokens (their
+    // hd claim); with a non-Google OIDC issuer configured, hostedDomain will always be null and
+    // every OIDC login will be denied. This is a heuristic (issuer URLs vary), so it warns rather
+    // than blocking startup, but it should catch the common misconfiguration case.
+    console.warn(
+        `\nWARNING: ALLOWED_GOOGLE_WORKSPACE_DOMAINS is set, but OPENID_CLIENT_ISSUER ("${OPID_CLIENT_ISSUER}") ` +
+            "does not look like Google. This feature only recognizes Google's hd claim, so every OpenID login " +
+            "will be denied unless the issuer is Google (e.g. https://accounts.google.com).\n",
+    );
+}
 export const DISABLE_ANONYMOUS: boolean = env.DISABLE_ANONYMOUS;
 export const PROMETHEUS_AUTHORIZATION_TOKEN = env.PROMETHEUS_AUTHORIZATION_TOKEN;
 export const PROMETHEUS_PORT = env.PROMETHEUS_PORT === env.PUSHER_HTTP_PORT ? 0 : env.PROMETHEUS_PORT;
