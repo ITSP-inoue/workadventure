@@ -20,6 +20,15 @@ export const AuthTokenData = z.object({
         }, z.string().array())
         .optional(),
     matrixUserId: z.string().optional(),
+    /**
+     * The Google Workspace hd claim captured at login time, or null if the account
+     * had none (e.g. personal Gmail, or a non-Google login). Absent (undefined) on
+     * tokens issued before this field existed. Re-checked against the *current*
+     * ALLOWED_GOOGLE_WORKSPACE_DOMAINS on every /me reconnect (spec-kit-practice#1,
+     * FR-010, T027) so an admin narrowing the allow-list takes effect without
+     * forcing every session to be dropped immediately.
+     */
+    hostedDomain: z.string().nullable().optional(),
 });
 export type AuthTokenData = z.infer<typeof AuthTokenData>;
 
@@ -66,8 +75,9 @@ export class JWTTokenManager {
         locale?: string,
         tags?: string[],
         matrixUserId?: string,
+        hostedDomain?: string | null,
     ): Promise<string> {
-        return new SignJWT({ identifier, accessToken, username, locale, tags, matrixUserId })
+        return new SignJWT({ identifier, accessToken, username, locale, tags, matrixUserId, hostedDomain })
             .setExpirationTime("30d")
             .setProtectedHeader({ alg: "HS256" })
             .sign(secret);

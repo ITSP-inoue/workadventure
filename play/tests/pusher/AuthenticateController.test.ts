@@ -4,20 +4,22 @@ import type { Application, Request, Response } from "express";
 vi.mock("../../src/pusher/enums/EnvironmentVariable", () => import("./mocks/pusherEnvironmentVariableMock"));
 
 const getUserInfo = vi.fn();
+const checkTokenAuth = vi.fn();
 vi.mock("../../src/pusher/services/OpenIDClient", () => ({
     openIDClient: {
         getUserInfo,
         authorizationUrl: vi.fn(),
         logoutUser: vi.fn(),
-        checkTokenAuth: vi.fn(),
+        checkTokenAuth,
     },
 }));
 
 const createAuthToken = vi.fn();
+const verifyJWTToken = vi.fn();
 vi.mock("../../src/pusher/services/JWTTokenManager", () => ({
     jwtTokenManager: {
         createAuthToken,
-        verifyJWTToken: vi.fn(),
+        verifyJWTToken,
     },
 }));
 
@@ -25,6 +27,11 @@ vi.mock("../../src/pusher/services/MatrixProvider", () => ({
     matrixProvider: {
         getBareMatrixIdFromEmail: vi.fn().mockReturnValue("@user:matrix.test"),
     },
+}));
+
+const fetchMemberDataByUuid = vi.fn();
+vi.mock("../../src/pusher/services/AdminService", () => ({
+    adminService: { fetchMemberDataByUuid },
 }));
 
 const checkDomain = vi.fn();
@@ -250,5 +257,86 @@ describe("AuthenticateController /anonymLogin — unaffected by Google Workspace
         expect(createAuthToken).toHaveBeenCalledTimes(1);
         expect(res.statusCode).not.toBe(403);
         expect(res.body).toContain("fake-anonymous-jwt-token");
+    });
+});
+
+function makeMeRequest(token = "fake-jwt-token"): Request {
+    return {
+        query: {
+            token,
+            playUri: "https://play.example.com/room",
+        },
+        header: () => undefined,
+    } as unknown as Request;
+}
+
+describe("AuthenticateController /me — re-validates the Workspace domain on reconnect (T025, T027)", () => {
+    let app: MockApp;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        fetchMemberDataByUuid.mockResolvedValue({ status: "ok" });
+        checkTokenAuth.mockResolvedValue({});
+        app = new MockApp();
+        new AuthenticateController(app as unknown as Application);
+    });
+
+    it("re-checks the stored hd claim against the current allow-list and proceeds when still allowed", async () => {
+        verifyJWTToken.mockResolvedValue({
+            identifier: "user@example-corp.com",
+            accessToken: "google-access-token",
+            hostedDomain: "example-corp.com",
+        });
+        checkDomain.mockReturnValue({ allowed: true, domain: "example-corp.com" });
+
+        const res = new FakeResponse();
+        await app.simulateGet("/me", makeMeRequest(), res as unknown as Response);
+
+        expect(checkDomain).toHaveBeenCalledWith("example-corp.com");
+        expect(checkTokenAuth).toHaveBeenCalledTimes(1);
+        expect(logAuthenticationAttempt).not.toHaveBeenCalled();
+        const body = JSON.parse(res.body ?? "{}");
+        expect(body.type).not.toBe("unauthorized");
+    });
+
+    it("denies reconnection and does not call checkTokenAuth when the domain is no longer allowed", async () => {
+        // Simulates an admin having narrowed ALLOWED_GOOGLE_WORKSPACE_DOMAINS after this
+        // session's original login: the JWT still carries the old hd claim, but the
+        // validator (reflecting the *current* config) now denies it.
+        verifyJWTToken.mockResolvedValue({
+            identifier: "user@example-corp.com",
+            accessToken: "google-access-token",
+            hostedDomain: "example-corp.com",
+        });
+        checkDomain.mockReturnValue({ allowed: false, domain: "example-corp.com" });
+
+        const res = new FakeResponse();
+        await app.simulateGet("/me", makeMeRequest(), res as unknown as Response);
+
+        expect(checkTokenAuth).not.toHaveBeenCalled();
+        expect(logAuthenticationAttempt).toHaveBeenCalledWith({
+            result: "denied",
+            domain: "example-corp.com",
+            subject: "user@example-corp.com",
+        });
+        const body = JSON.parse(res.body ?? "{}");
+        expect(body).toMatchObject({
+            status: "error",
+            type: "unauthorized",
+            code: "GOOGLE_WORKSPACE_DOMAIN_NOT_ALLOWED",
+        });
+    });
+
+    it("does not consult AllowedDomainValidator for an anonymous session (no accessToken)", async () => {
+        verifyJWTToken.mockResolvedValue({
+            identifier: "some-anonymous-uuid",
+            accessToken: undefined,
+        });
+
+        const res = new FakeResponse();
+        await app.simulateGet("/me", makeMeRequest(), res as unknown as Response);
+
+        expect(checkDomain).not.toHaveBeenCalled();
+        expect(checkTokenAuth).not.toHaveBeenCalled();
     });
 });

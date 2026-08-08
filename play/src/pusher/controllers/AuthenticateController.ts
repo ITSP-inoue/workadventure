@@ -1,6 +1,6 @@
 import fs from "fs";
 import { v4 } from "uuid";
-import type { MeResponse, RegisterData } from "@workadventure/messages";
+import type { ErrorApiUnauthorizedData, MeResponse, RegisterData } from "@workadventure/messages";
 import { MeRequest } from "@workadventure/messages";
 import { z } from "zod";
 import { errors } from "jose";
@@ -233,6 +233,30 @@ export class AuthenticateController extends BaseHttpController {
                     return;
                 }
 
+                // Re-check Google Workspace domain membership on reconnect (spec-kit-practice#1,
+                // FR-010, T027): an admin narrowing ALLOWED_GOOGLE_WORKSPACE_DOMAINS after this
+                // session's login takes effect here, without waiting for the JWT to expire. Only
+                // the denial transition is logged -- the initial login already logged the allow
+                // (T011), and logging every reconnect heartbeat as "allowed" would just be noise.
+                const reconnectDomainCheck = allowedDomainValidator.check(authTokenData.hostedDomain ?? null);
+                if (!reconnectDomainCheck.allowed) {
+                    logAuthenticationAttempt({
+                        result: "denied",
+                        domain: reconnectDomainCheck.domain,
+                        subject: authTokenData.identifier,
+                    });
+                    res.json({
+                        status: "error",
+                        type: "unauthorized",
+                        code: "GOOGLE_WORKSPACE_DOMAIN_NOT_ALLOWED",
+                        title: "Access no longer allowed",
+                        subtitle: "Your Google account is no longer part of an organization allowed to access this space.",
+                        details: "Please log out and sign in again with an account from an allowed organization.",
+                        buttonTitle: "Log out",
+                    } satisfies ErrorApiUnauthorizedData);
+                    return;
+                }
+
                 try {
                     const resCheckTokenAuth = await openIDClient.checkTokenAuth(authTokenData.accessToken);
                     res.json({
@@ -340,6 +364,7 @@ export class AuthenticateController extends BaseHttpController {
                 userInfo?.locale,
                 userInfo?.tags,
                 email ? matrixProvider.getBareMatrixIdFromEmail(email) : undefined,
+                domainCheck.domain,
             );
 
             const matrixPublicUri = userInfo.matrix_url ?? MATRIX_PUBLIC_URI;
