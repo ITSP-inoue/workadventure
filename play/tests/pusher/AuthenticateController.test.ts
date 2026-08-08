@@ -146,7 +146,7 @@ describe("AuthenticateController /openid-callback — Google Workspace domain re
 
         await app.simulateGet("/openid-callback", req, res as unknown as Response);
 
-        expect(checkDomain).toHaveBeenCalledWith("example-corp.com");
+        expect(checkDomain).toHaveBeenCalledWith("example-corp.com", "user@example-corp.com");
         expect(createAuthToken).toHaveBeenCalledTimes(1);
         expect(res.redirectedTo).toBe("https://play.example.com/room?token=fake-jwt-token");
         expect(res.statusCode).not.toBe(403);
@@ -183,6 +183,24 @@ describe("AuthenticateController /openid-callback — Google Workspace domain re
             domain: null,
             subject: "1234567890",
         });
+    });
+
+    it("rejects an email/hd mismatch (T019) and does not issue a JWT", async () => {
+        // AllowedDomainValidator itself denies mismatches; here we only confirm the
+        // controller forwards the raw email and honors whatever the validator decides.
+        checkDomain.mockReturnValue({ allowed: false, domain: "example-corp.com" });
+        getUserInfo.mockResolvedValue(
+            makeUserInfo({ email: "user@other-company.com", hostedDomain: "example-corp.com" }),
+        );
+
+        const req = { cookies: { playUri: "https://play.example.com/room" } } as unknown as Request;
+        const res = new FakeResponse();
+
+        await app.simulateGet("/openid-callback", req, res as unknown as Response);
+
+        expect(checkDomain).toHaveBeenCalledWith("example-corp.com", "user@other-company.com");
+        expect(createAuthToken).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(403);
     });
 
     it("does not restrict logins when the domain allow-list is disabled (FR-011)", async () => {

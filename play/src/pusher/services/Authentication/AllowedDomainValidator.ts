@@ -15,6 +15,22 @@ export interface AllowedDomainCheckResult {
     readonly domain: string | null;
 }
 
+/**
+ * A genuine Google-issued token for a Workspace account always has the email's domain
+ * suffix equal to `hd`. A mismatch indicates either a non-Google/misconfigured IdP
+ * response or client-side tampering, so it is treated as suspicious regardless of
+ * what the (possibly forged) `hd` value itself says (spec.md Edge Cases: "なりすまし・
+ * 表記ゆれ").
+ */
+function emailMatchesHostedDomain(email: string, hostedDomain: string): boolean {
+    const atIndex = email.lastIndexOf("@");
+    if (atIndex === -1) {
+        return false;
+    }
+    const emailDomain = email.slice(atIndex + 1).toLowerCase();
+    return emailDomain === hostedDomain.toLowerCase();
+}
+
 export class AllowedDomainValidator {
     constructor(private readonly allowedDomains: readonly string[] = ALLOWED_GOOGLE_WORKSPACE_DOMAINS) {}
 
@@ -22,12 +38,23 @@ export class AllowedDomainValidator {
         return this.allowedDomains.length > 0;
     }
 
-    check(hostedDomain: string | null): AllowedDomainCheckResult {
+    /**
+     * @param email Optional; when provided and the feature is enabled, a mismatch
+     * between the email's domain suffix and `hostedDomain` denies the attempt even if
+     * `hostedDomain` itself is on the allow-list (T019). Only enforced while the
+     * feature is enabled, so a disabled allow-list never rejects logins (FR-011).
+     */
+    check(hostedDomain: string | null, email: string | null = null): AllowedDomainCheckResult {
         if (!this.isEnabled) {
             return { allowed: true, domain: hostedDomain };
         }
-        const allowed = hostedDomain !== null && this.allowedDomains.includes(hostedDomain.toLowerCase());
-        return { allowed, domain: hostedDomain };
+        if (hostedDomain === null || !this.allowedDomains.includes(hostedDomain.toLowerCase())) {
+            return { allowed: false, domain: hostedDomain };
+        }
+        if (email !== null && !emailMatchesHostedDomain(email, hostedDomain)) {
+            return { allowed: false, domain: hostedDomain };
+        }
+        return { allowed: true, domain: hostedDomain };
     }
 }
 

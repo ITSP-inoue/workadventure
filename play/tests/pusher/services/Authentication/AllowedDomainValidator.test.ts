@@ -56,4 +56,46 @@ describe("AllowedDomainValidator", () => {
             expect(validator.check("unrelated-company.com").allowed).toBe(false);
         });
     });
+
+    describe("email / hd mismatch detection (T019)", () => {
+        const validator = new AllowedDomainValidator(["example-corp.com"]);
+
+        it("allows when the email domain matches the allowed hd claim", () => {
+            expect(validator.check("example-corp.com", "user@example-corp.com")).toEqual({
+                allowed: true,
+                domain: "example-corp.com",
+            });
+        });
+
+        it("matches the email domain case-insensitively", () => {
+            expect(validator.check("example-corp.com", "user@Example-Corp.COM").allowed).toBe(true);
+        });
+
+        it("denies when the email domain does not match an otherwise-allowed hd claim", () => {
+            expect(validator.check("example-corp.com", "user@other-company.com")).toEqual({
+                allowed: false,
+                domain: "example-corp.com",
+            });
+        });
+
+        it("denies when the email has no domain part at all", () => {
+            expect(validator.check("example-corp.com", "not-an-email").allowed).toBe(false);
+        });
+
+        it("does not run the mismatch check when the feature is disabled", () => {
+            const disabledValidator = new AllowedDomainValidator([]);
+            expect(disabledValidator.check("example-corp.com", "user@other-company.com")).toEqual({
+                allowed: true,
+                domain: "example-corp.com",
+            });
+        });
+
+        it("still denies an out-of-allow-list hd claim even when no email is provided", () => {
+            expect(validator.check("other-company.com", null).allowed).toBe(false);
+        });
+
+        it("does not enforce the mismatch check when email is omitted", () => {
+            expect(validator.check("example-corp.com").allowed).toBe(true);
+        });
+    });
 });

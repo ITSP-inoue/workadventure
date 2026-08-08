@@ -321,7 +321,7 @@ export class AuthenticateController extends BaseHttpController {
             // When ALLOWED_GOOGLE_WORKSPACE_DOMAINS is unset, allowedDomainValidator.check()
             // always allows, so anonymous/ADMIN_API_URL flows and OIDC providers other than
             // Google are unaffected (FR-011).
-            const domainCheck = allowedDomainValidator.check(userInfo.hostedDomain);
+            const domainCheck = allowedDomainValidator.check(userInfo.hostedDomain, userInfo.email || null);
             logAuthenticationAttempt({
                 result: domainCheck.allowed ? "allowed" : "denied",
                 domain: domainCheck.domain,
